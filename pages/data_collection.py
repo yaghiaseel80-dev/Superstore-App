@@ -17,9 +17,7 @@ def _show_validation_error(result):
             "".join([f"<span style='background:#fde8e8; border-radius:4px; padding:2px 8px; "
                      f"margin:2px; display:inline-block;'>✗ {c}</span>"
                      for c in result["missing_columns"]]) +
-            "</div></div>",
-            unsafe_allow_html=True
-        )
+            "</div></div>", unsafe_allow_html=True)
     elif result["message"] == "type_errors":
         st.error("❌ This file has incompatible data types in required columns.")
         st.markdown(
@@ -30,48 +28,45 @@ def _show_validation_error(result):
             "<div style='font-size:13px; color:#555;'>" +
             "".join([f"<div style='margin-bottom:4px;'>⚠️ {e}</div>"
                      for e in result["type_errors"]]) +
-            "</div></div>",
-            unsafe_allow_html=True
-        )
+            "</div></div>", unsafe_allow_html=True)
 
 
 def _row_count_control(key, total_rows):
-    """Renders a sleek row count selector. Returns selected number of rows."""
-    st.markdown(f"""
-    <div style='display:flex; align-items:center; justify-content:space-between;
-                background:#f8fffe; border:1.5px solid #17a589; border-radius:10px;
-                padding:10px 18px; margin-bottom:12px;'>
-        <div style='display:flex; align-items:center; gap:8px;'>
-            <i class='bi bi-table' style='color:#17a589; font-size:16px;'></i>
-            <span style='font-weight:600; color:#1a2940; font-size:14px;'>Data Preview</span>
-            <span style='font-size:12px; color:#888;'>— {total_rows:,} rows total</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    col_minus, col_num, col_plus, col_spacer = st.columns([0.08, 0.18, 0.08, 0.66])
-
+    """Clean row count control using only buttons — no conflicting number input."""
     if f"preview_rows_{key}" not in st.session_state:
         st.session_state[f"preview_rows_{key}"] = 10
 
+    current = st.session_state[f"preview_rows_{key}"]
+
+    st.markdown(f"""
+    <div style='display:flex; align-items:center; gap:10px; margin-bottom:12px;
+                background:#f8fffe; border:1.5px solid #17a589; border-radius:10px;
+                padding:10px 18px;'>
+        <i class='bi bi-table' style='color:#17a589; font-size:16px;'></i>
+        <span style='font-weight:600; color:#1a2940; font-size:14px;'>Data Preview</span>
+        <span style='font-size:12px; color:#888;'>— {total_rows:,} rows total</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_minus, col_display, col_plus, col_spacer = st.columns([0.06, 0.12, 0.06, 0.76])
+
     with col_minus:
         if st.button("−", key=f"minus_{key}", help="Show fewer rows"):
-            st.session_state[f"preview_rows_{key}"] = max(
-                5, st.session_state[f"preview_rows_{key}"] - 5)
+            st.session_state[f"preview_rows_{key}"] = max(5, current - 5)
+            st.rerun()
 
-    with col_num:
-        new_val = st.number_input(
-            "", min_value=5, max_value=total_rows,
-            value=st.session_state[f"preview_rows_{key}"],
-            step=5, key=f"num_input_{key}",
-            label_visibility="collapsed"
+    with col_display:
+        st.markdown(
+            f"<div style='background:white; border:1.5px solid #17a589; border-radius:8px;"
+            f"text-align:center; padding:6px 0; font-weight:700; font-size:15px;"
+            f"color:#1a2940;'>{current}</div>",
+            unsafe_allow_html=True
         )
-        st.session_state[f"preview_rows_{key}"] = new_val
 
     with col_plus:
         if st.button("+", key=f"plus_{key}", help="Show more rows"):
-            st.session_state[f"preview_rows_{key}"] = min(
-                total_rows, st.session_state[f"preview_rows_{key}"] + 5)
+            st.session_state[f"preview_rows_{key}"] = min(total_rows, current + 5)
+            st.rerun()
 
     return int(st.session_state[f"preview_rows_{key}"])
 
@@ -86,7 +81,6 @@ def _show_data_summary(df, key="dc"):
     with c4: kpi_card("bi-copy",                 "Duplicate Rows", f"{dups:,}")
 
     st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
-
     n_rows = _row_count_control(key, len(df))
     st.dataframe(df.head(n_rows), use_container_width=True, hide_index=True)
 
@@ -96,7 +90,6 @@ def _show_data_summary(df, key="dc"):
 
 def show():
     apply_style()
-
     page_header(
         "Data Collection",
         "Upload your Superstore dataset to begin. The application will validate and preview your data before you proceed."
@@ -113,35 +106,21 @@ def show():
         st.markdown("---")
 
     section_header("Select Data Source")
-
-    mode = st.radio(
-        "",
-        ["📁  Upload a File", "🔗  Google Sheet URL"],
-        horizontal=True,
-        label_visibility="collapsed"
-    )
-
+    mode = st.radio("", ["📁  Upload a File", "🔗  Google Sheet URL"],
+                    horizontal=True, label_visibility="collapsed")
     st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
 
-    # ── MODE A ────────────────────────────────────────────────────────────────
     if mode == "📁  Upload a File":
         section_header("Upload File")
-
         st.markdown("""
         <div style="background:#f0faf8; border:1.5px solid #17a589; border-radius:10px;
                     padding:12px 16px; display:flex; align-items:center; gap:12px; margin-bottom:16px;">
             <i class="bi bi-cloud-arrow-up-fill" style="font-size:22px; color:#17a589; flex-shrink:0;"></i>
-            <span style="font-size:13px;">
-                Accepted formats: <b>.csv</b>, <b>.xls</b>, <b>.xlsx</b>
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
+            <span style="font-size:13px;">Accepted formats: <b>.csv</b>, <b>.xls</b>, <b>.xlsx</b></span>
+        </div>""", unsafe_allow_html=True)
 
-        uploaded = st.file_uploader(
-            "Drop your file here or click to browse",
-            type=["csv", "xls", "xlsx"],
-            label_visibility="visible"
-        )
+        uploaded = st.file_uploader("Drop your file here or click to browse",
+                                     type=["csv", "xls", "xlsx"], label_visibility="visible")
 
         if uploaded:
             try:
@@ -153,7 +132,7 @@ def show():
                     sheet = "Orders" if "Orders" in xl.sheet_names else xl.sheet_names[0]
                     df    = xl.parse(sheet)
 
-                df = df.loc[:, ~df.columns.str.match(r'^Unnamed')]
+                df     = df.loc[:, ~df.columns.str.match(r'^Unnamed')]
                 result = validate_superstore_schema(df)
 
                 if not result["valid"]:
@@ -172,35 +151,23 @@ def show():
             except Exception as e:
                 st.error(f"❌ Could not read file: {e}")
 
-    # ── MODE B ────────────────────────────────────────────────────────────────
     else:
         section_header("Google Sheet URL")
-
         st.markdown("""
         <div style="background:#f0faf8; border:1.5px solid #17a589; border-radius:10px;
                     padding:12px 16px; display:flex; align-items:center; gap:12px; margin-bottom:16px;">
             <i class="bi bi-link-45deg" style="font-size:22px; color:#17a589; flex-shrink:0;"></i>
-            <span style="font-size:13px;">
-                Paste the shareable link of your public Google Sheet below.
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
+            <span style="font-size:13px;">Paste the shareable link of your public Google Sheet below.</span>
+        </div>""", unsafe_allow_html=True)
 
         st.markdown("""
-        <style>
-        div[data-testid="InputInstructions"] { display: none !important; }
-        </style>
+        <style>div[data-testid="InputInstructions"] { display: none !important; }</style>
         """, unsafe_allow_html=True)
 
-        url = st.text_input(
-            "Google Sheet URL",
-            placeholder="https://docs.google.com/spreadsheets/d/...",
-        )
-        st.markdown(
-            "<p style='font-size:11px; color:#888; margin-top:-12px;'>"
-            "Press Enter to load the sheet.</p>",
-            unsafe_allow_html=True
-        )
+        url = st.text_input("Google Sheet URL",
+                             placeholder="https://docs.google.com/spreadsheets/d/...")
+        st.markdown("<p style='font-size:11px; color:#888; margin-top:-12px;'>Press Enter to load the sheet.</p>",
+                    unsafe_allow_html=True)
 
         if url:
             with st.spinner("Loading sheet..."):
@@ -244,8 +211,7 @@ def show():
                         <i class='bi bi-layout-three-columns' style='color:#17a589; margin-right:6px;'></i>
                         <b>Columns:</b> {len(df.columns)}
                     </div>
-                </div>
-                """, unsafe_allow_html=True)
+                </div>""", unsafe_allow_html=True)
 
             if val["warnings"]:
                 st.info("ℹ️ Some optional columns are missing but the app will work normally: " +
