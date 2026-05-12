@@ -6,7 +6,6 @@ from src.google_sheets import load_google_sheet
 
 
 def _show_validation_error(result):
-    """Shows a professional but specific validation error."""
     if result["message"] == "missing_columns":
         st.error("❌ This file is missing required columns and cannot be processed.")
         st.markdown(
@@ -36,8 +35,48 @@ def _show_validation_error(result):
         )
 
 
-def _show_data_summary(df):
-    """Helper: show KPI cards + preview."""
+def _row_count_control(key, total_rows):
+    """Renders a sleek row count selector. Returns selected number of rows."""
+    st.markdown(f"""
+    <div style='display:flex; align-items:center; justify-content:space-between;
+                background:#f8fffe; border:1.5px solid #17a589; border-radius:10px;
+                padding:10px 18px; margin-bottom:12px;'>
+        <div style='display:flex; align-items:center; gap:8px;'>
+            <i class='bi bi-table' style='color:#17a589; font-size:16px;'></i>
+            <span style='font-weight:600; color:#1a2940; font-size:14px;'>Data Preview</span>
+            <span style='font-size:12px; color:#888;'>— {total_rows:,} rows total</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_minus, col_num, col_plus, col_spacer = st.columns([0.08, 0.18, 0.08, 0.66])
+
+    if f"preview_rows_{key}" not in st.session_state:
+        st.session_state[f"preview_rows_{key}"] = 10
+
+    with col_minus:
+        if st.button("−", key=f"minus_{key}", help="Show fewer rows"):
+            st.session_state[f"preview_rows_{key}"] = max(
+                5, st.session_state[f"preview_rows_{key}"] - 5)
+
+    with col_num:
+        new_val = st.number_input(
+            "", min_value=5, max_value=total_rows,
+            value=st.session_state[f"preview_rows_{key}"],
+            step=5, key=f"num_input_{key}",
+            label_visibility="collapsed"
+        )
+        st.session_state[f"preview_rows_{key}"] = new_val
+
+    with col_plus:
+        if st.button("+", key=f"plus_{key}", help="Show more rows"):
+            st.session_state[f"preview_rows_{key}"] = min(
+                total_rows, st.session_state[f"preview_rows_{key}"] + 5)
+
+    return int(st.session_state[f"preview_rows_{key}"])
+
+
+def _show_data_summary(df, key="dc"):
     nulls = int(df.isnull().sum().sum())
     dups  = int(df.duplicated().sum())
     c1, c2, c3, c4 = st.columns(4)
@@ -47,10 +86,11 @@ def _show_data_summary(df):
     with c4: kpi_card("bi-copy",                 "Duplicate Rows", f"{dups:,}")
 
     st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
-    section_header("Data Preview (first 10 rows)")
-    st.dataframe(df.head(10), use_container_width=True, hide_index=True)
 
-    with st.expander("📋 Full Schema Summary"):
+    n_rows = _row_count_control(key, len(df))
+    st.dataframe(df.head(n_rows), use_container_width=True, hide_index=True)
+
+    with st.expander("Full Schema Summary"):
         st.dataframe(get_schema_summary(df), use_container_width=True, hide_index=True)
 
 
@@ -62,7 +102,6 @@ def show():
         "Upload your Superstore dataset to begin. The application will validate and preview your data before you proceed."
     )
 
-    # ── If data already loaded ────────────────────────────────────────────────
     if "raw_df" in st.session_state:
         st.success(
             f"✅ Dataset already loaded — "
@@ -70,7 +109,7 @@ def show():
             f"{len(st.session_state['raw_df'].columns)} columns. "
             f"You can re-upload below to replace it."
         )
-        _show_data_summary(st.session_state["raw_df"])
+        _show_data_summary(st.session_state["raw_df"], key="dc_existing")
         st.markdown("---")
 
     section_header("Select Data Source")
@@ -84,7 +123,7 @@ def show():
 
     st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
 
-    # ── MODE A: FILE UPLOAD ───────────────────────────────────────────────────
+    # ── MODE A ────────────────────────────────────────────────────────────────
     if mode == "📁  Upload a File":
         section_header("Upload File")
 
@@ -115,7 +154,6 @@ def show():
                     df    = xl.parse(sheet)
 
                 df = df.loc[:, ~df.columns.str.match(r'^Unnamed')]
-
                 result = validate_superstore_schema(df)
 
                 if not result["valid"]:
@@ -129,12 +167,12 @@ def show():
                     st.info("ℹ️ Some optional columns are missing but the app will work normally: " +
                             ", ".join(result["warnings"]))
 
-                _show_data_summary(df)
+                _show_data_summary(df, key="dc_upload")
 
             except Exception as e:
                 st.error(f"❌ Could not read file: {e}")
 
-    # ── MODE B: GOOGLE SHEET ──────────────────────────────────────────────────
+    # ── MODE B ────────────────────────────────────────────────────────────────
     else:
         section_header("Google Sheet URL")
 
@@ -183,7 +221,6 @@ def show():
             st.session_state["raw_df"] = df
             st.success(f"✅ Sheet loaded — {len(df):,} rows × {len(df.columns)} columns")
 
-            # Sidebar metadata
             with st.sidebar:
                 st.markdown(f"""
                 <div style='padding:14px;'>
@@ -214,4 +251,4 @@ def show():
                 st.info("ℹ️ Some optional columns are missing but the app will work normally: " +
                         ", ".join(val["warnings"]))
 
-            _show_data_summary(df)
+            _show_data_summary(df, key="dc_sheet")

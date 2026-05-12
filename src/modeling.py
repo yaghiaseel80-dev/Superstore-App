@@ -2,100 +2,98 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import (
+    mean_absolute_error, mean_squared_error, r2_score, silhouette_score
+)
 from sklearn.model_selection import cross_val_score, train_test_split
-from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 
-# ── Feature preparation ───────────────────────────────────────────────────────
+# ── Target definitions ────────────────────────────────────────────────────────
 
-def prepare_features(df, target="Sales", feature_cols=None):
-    """
-    Prepares X (features) and y (target) for ML.
+TARGET_CONFIG = {
+    "Shipping Duration": {
+        "col":         "Shipping Duration",
+        "features":    ["Ship Mode", "Region", "Category", "Segment", "Sub-Category"],
+        "unit":        "days",
+        "description": "Predict how many days shipping will take based on logistics and order details.",
+    },
+    "Discount": {
+        "col":         "Discount",
+        "features":    ["Category", "Sub-Category", "Region", "Segment", "Quantity"],
+        "unit":        "%",
+        "description": "Predict the discount rate likely applied to an order.",
+    },
+}
 
-    - Drops rows where target is null
-    - One-hot encodes categorical columns
-    - Fills remaining nulls with column median
-    - Returns X, y, and the list of final feature names
-    """
+
+# ── Feature preparation (supervised) ─────────────────────────────────────────
+
+def prepare_features(df, target="Shipping Duration", feature_cols=None):
     df = df.copy()
 
-    # Default feature columns if not specified
+    if target == "Shipping Duration":
+        if "Shipping Duration" not in df.columns:
+            if "Order Date" in df.columns and "Ship Date" in df.columns:
+                df["Order Date"] = pd.to_datetime(df["Order Date"], errors="coerce")
+                df["Ship Date"]  = pd.to_datetime(df["Ship Date"],  errors="coerce")
+                df["Shipping Duration"] = (df["Ship Date"] - df["Order Date"]).dt.days
+            else:
+                raise ValueError("Dataset must contain 'Order Date' and 'Ship Date'.")
+
     if feature_cols is None:
-        feature_cols = ["Quantity", "Discount", "Category", "Region", "Segment", "Ship Mode"]
+        feature_cols = TARGET_CONFIG.get(target, {}).get("features", [])
 
-    # Keep only columns that exist in the dataframe
     feature_cols = [c for c in feature_cols if c in df.columns]
-
-    # Drop rows where target is missing
     df = df.dropna(subset=[target])
-
-    # Ensure target is numeric
     df[target] = pd.to_numeric(df[target], errors="coerce")
     df = df.dropna(subset=[target])
 
+    if target == "Shipping Duration":
+        df = df[df[target] >= 0]
+
     y = df[target].values
 
-    # Separate numeric and categorical features
     numeric_cols     = [c for c in feature_cols if df[c].dtype in [np.float64, np.int64, float, int]]
     categorical_cols = [c for c in feature_cols if c not in numeric_cols]
 
-    # One-hot encode categorical columns
     X = df[numeric_cols].copy()
     for col in categorical_cols:
         dummies = pd.get_dummies(df[col], prefix=col, drop_first=False)
         X = pd.concat([X, dummies], axis=1)
 
-    # Fill any remaining nulls
     X = X.fillna(X.median(numeric_only=True))
-
-    # Convert bool columns to int
     for col in X.columns:
         if X[col].dtype == bool:
             X[col] = X[col].astype(int)
 
-    feature_names = X.columns.tolist()
-    return X.values, y, feature_names
+    return X.values, y, X.columns.tolist()
 
 
-# ── Model training ────────────────────────────────────────────────────────────
+# ── Model training (supervised) ───────────────────────────────────────────────
 
 def train_models(X, y):
-    """
-    Trains Linear Regression and Random Forest on the data.
-    Uses 5-fold cross-validation for fair evaluation.
-    Returns a dict with metrics and fitted models.
-    """
     results = {}
-
     models = {
         "Linear Regression": LinearRegression(),
         "Random Forest":     RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
     }
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     for name, model in models.items():
-        # Cross-validation R² scores
         cv_scores = cross_val_score(model, X, y, cv=5, scoring="r2")
-
-        # Fit on training set, evaluate on test set
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
 
-        mae  = mean_absolute_error(y_test, y_pred)
-        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-        r2   = r2_score(y_test, y_pred)
-
         results[name] = {
-            "model":     model,
-            "y_test":    y_test,
-            "y_pred":    y_pred,
-            "mae":       round(mae, 2),
-            "rmse":      round(rmse, 2),
-            "r2":        round(r2, 4),
+            "model":      model,
+            "y_test":     y_test,
+            "y_pred":     y_pred,
+            "mae":        round(mean_absolute_error(y_test, y_pred), 2),
+            "rmse":       round(np.sqrt(mean_squared_error(y_test, y_pred)), 2),
+            "r2":         round(r2_score(y_test, y_pred), 4),
             "cv_r2_mean": round(cv_scores.mean(), 4),
             "cv_r2_std":  round(cv_scores.std(), 4),
         }
@@ -106,11 +104,6 @@ def train_models(X, y):
 # ── Feature importance ────────────────────────────────────────────────────────
 
 def get_feature_importance(model, feature_names, top_n=15):
-    """
-    Returns a DataFrame of feature importances.
-    Works for Random Forest (feature_importances_) and
-    Linear Regression (absolute coefficients).
-    """
     if hasattr(model, "feature_importances_"):
         importances = model.feature_importances_
     elif hasattr(model, "coef_"):
@@ -123,43 +116,157 @@ def get_feature_importance(model, feature_names, top_n=15):
         "Importance": importances
     }).sort_values("Importance", ascending=False).head(top_n)
 
-    # Normalize to percentage
     df["Importance %"] = (df["Importance"] / df["Importance"].sum() * 100).round(1)
-
     return df.reset_index(drop=True)
 
 
-# ── Business interpretation ───────────────────────────────────────────────────
+# ── Single prediction (supervised) ───────────────────────────────────────────
+
+def predict_single(model, feature_names, input_dict):
+    row      = pd.DataFrame([input_dict])
+    cat_cols = [c for c in input_dict if isinstance(input_dict[c], str)]
+    num_cols = [c for c in input_dict if not isinstance(input_dict[c], str)]
+
+    X = row[num_cols].copy() if num_cols else pd.DataFrame(index=[0])
+    for col in cat_cols:
+        dummies = pd.get_dummies(row[col], prefix=col)
+        X = pd.concat([X, dummies], axis=1)
+
+    X = X.reindex(columns=feature_names, fill_value=0)
+    for col in X.columns:
+        if X[col].dtype == bool:
+            X[col] = X[col].astype(int)
+
+    return model.predict(X.values)[0]
+
+
+# ── Business interpretation (supervised) ─────────────────────────────────────
 
 def interpret_results(results, target):
-    """
-    Returns a plain-English summary of model performance
-    and what it means for the business.
-    """
     best_model = max(results, key=lambda k: results[k]["r2"])
     best       = results[best_model]
-    other      = [k for k in results if k != best_model][0]
-
-    r2_pct  = round(best["r2"] * 100, 1)
-    mae_fmt = f"${best['mae']:,.0f}" if target == "Sales" else f"${best['mae']:,.2f}"
+    unit_map   = {"Shipping Duration": "days", "Discount": "%"}
+    unit       = unit_map.get(target, "")
 
     lines = [
-        f"**Best performing model: {best_model}** with an R² of {best['r2']} ({r2_pct}% of variance explained).",
-        f"On average, predictions are off by {mae_fmt} (MAE). "
-        f"The lower this number, the more reliable the model is for business planning.",
-        f"Cross-validation R² of {best['cv_r2_mean']} (±{best['cv_r2_std']}) confirms the model generalises well to unseen data — it's not just memorising the training set.",
+        f"**Best model: {best_model}** — R² of {best['r2']} ({round(best['r2']*100,1)}% variance explained).",
+        f"Average prediction error: {best['mae']:.2f} {unit} (MAE).",
+        f"Cross-validation R²: {best['cv_r2_mean']} (±{best['cv_r2_std']}).",
     ]
 
     if best["r2"] >= 0.75:
-        lines.append(f"✅ The model explains a strong portion of {target} variation — suitable for forecasting and scenario planning.")
+        lines.append("Strong predictive power — suitable for operational planning.")
     elif best["r2"] >= 0.5:
-        lines.append(f"⚠️ The model explains a moderate portion of {target} variation. Useful for trend analysis but predictions should be treated as estimates.")
+        lines.append("Moderate predictive power — useful for trend analysis.")
     else:
-        lines.append(f"⚠️ The model has limited predictive power for {target}. Consider adding more features or reviewing data quality.")
-
-    lines.append(
-        f"The Feature Importance chart below shows which factors drive {target} most. "
-        f"Focus business attention on the top-ranked features for maximum impact."
-    )
+        lines.append("Limited predictive power — consider adding more features.")
 
     return lines
+
+
+# ── Clustering helpers (unsupervised) ─────────────────────────────────────────
+
+CLUSTER_FEATURES = ["Sales", "Profit", "Discount", "Quantity"]
+
+
+def prepare_cluster_data(df):
+    """Aggregate to customer level and scale for KMeans."""
+    df = df.copy()
+
+    for col in CLUSTER_FEATURES:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    agg_dict = {}
+    if "Sales"    in df.columns: agg_dict["Sales"]    = ("Sales",    "sum")
+    if "Profit"   in df.columns: agg_dict["Profit"]   = ("Profit",   "sum")
+    if "Discount" in df.columns: agg_dict["Discount"] = ("Discount", "mean")
+    if "Quantity" in df.columns: agg_dict["Quantity"] = ("Quantity", "sum")
+    if "Order ID" in df.columns: agg_dict["Orders"]   = ("Order ID", "nunique")
+
+    group_col = (
+        "Customer ID"   if "Customer ID"   in df.columns else
+        "Customer Name" if "Customer Name" in df.columns else None
+    )
+    if group_col is None:
+        raise ValueError("Dataset must contain 'Customer ID' or 'Customer Name'.")
+
+    customer_df  = df.groupby(group_col).agg(**agg_dict).reset_index()
+    customer_df  = customer_df.dropna()
+    feature_cols = [c for c in ["Sales", "Profit", "Discount", "Quantity", "Orders"]
+                    if c in customer_df.columns]
+
+    scaler   = StandardScaler()
+    X_scaled = scaler.fit_transform(customer_df[feature_cols].values)
+
+    return X_scaled, scaler, customer_df, feature_cols
+
+
+def find_optimal_clusters(X_scaled, k_min=2, k_max=8):
+    """Elbow + Silhouette → optimal K."""
+    inertias   = []
+    sil_scores = []
+    k_range    = list(range(k_min, k_max + 1))
+
+    for k in k_range:
+        km     = KMeans(n_clusters=k, random_state=42, n_init=10)
+        labels = km.fit_predict(X_scaled)
+        inertias.append(km.inertia_)
+        sil_scores.append(silhouette_score(X_scaled, labels))
+
+    # Elbow: largest inertia drop
+    drops   = [inertias[i] - inertias[i+1] for i in range(len(inertias)-1)]
+    elbow_k = k_range[drops.index(max(drops)) + 1]
+
+    # Silhouette: highest score
+    sil_k   = k_range[sil_scores.index(max(sil_scores))]
+
+    if elbow_k == sil_k:
+        optimal_k = elbow_k
+        method    = "both the Elbow and Silhouette methods agree"
+    else:
+        optimal_k = sil_k
+        method    = "the Silhouette method (highest score)"
+
+    return optimal_k, {
+        "k_range":   k_range,
+        "inertias":  inertias,
+        "sil_scores": sil_scores,
+        "elbow_k":   elbow_k,
+        "sil_k":     sil_k,
+        "method":    method,
+        "optimal_k": optimal_k,
+    }
+
+
+def run_clustering(X_scaled, customer_df, feature_cols, optimal_k):
+    """Fit KMeans, label clusters, return enriched customer_df and profile."""
+    km           = KMeans(n_clusters=optimal_k, random_state=42, n_init=10)
+    customer_df  = customer_df.copy()
+    customer_df["Cluster"] = km.fit_predict(X_scaled)
+
+    profile = customer_df.groupby("Cluster")[feature_cols].mean().round(2)
+    profile["Customer Count"] = customer_df.groupby("Cluster").size().values
+
+    # Label by Sales rank
+    if "Sales" in profile.columns:
+        ranks = profile["Sales"].rank(ascending=False).astype(int)
+        n     = optimal_k
+        labels_map = {}
+        for idx, rank in ranks.items():
+            if rank == 1:       labels_map[idx] = "High-Value Customers"
+            elif rank == n:     labels_map[idx] = "Low-Value Customers"
+            elif rank == 2:     labels_map[idx] = "Growth Potential Customers"
+            else:               labels_map[idx] = "Mid-Tier Customers"
+        profile["Label"] = profile.index.map(labels_map)
+    else:
+        profile["Label"] = [f"Segment {i+1}" for i in profile.index]
+
+    return customer_df, profile, km
+
+
+def predict_cluster(km, scaler, feature_cols, input_dict):
+    """Predict cluster for a single new customer."""
+    row = pd.DataFrame([{col: input_dict.get(col, 0) for col in feature_cols}])
+    X   = scaler.transform(row.values)
+    return int(km.predict(X)[0])

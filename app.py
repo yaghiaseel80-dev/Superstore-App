@@ -96,10 +96,6 @@ if dark:
         color: #e0e7ef !important;
     }
 
-    /* Calendar popup */
-    [data-baseweb="calendar"],
-    [data-baseweb="calendar"] * { background-color: #1e2d40 !important; }
-
     /* Tabs */
     button[data-baseweb="tab"] { color: #a8d8d0 !important; }
     button[data-baseweb="tab"][aria-selected="true"] { color: #17a589 !important; }
@@ -144,11 +140,12 @@ st.markdown(
 
 # ── PAGE DEFINITIONS ──────────────────────────────────────────────────────────
 pages = [
-    ("☁", "Data Collection"),
-    ("▼", "Data Processing & Cleaning"),
-    ("▦", "Descriptive Analysis"),
-    ("⬡", "Machine Learning"),
-    ("ℹ", "About"),
+    ("☁",  "Data Collection"),
+    ("▼",  "Data Processing & Cleaning"),
+    ("▦",  "Descriptive Analysis"),
+    ("⬡",  "Machine Learning"),
+    ("◎",  "Predict"),
+    ("ℹ",  "About"),
 ]
 
 current = st.session_state["current_page"]
@@ -156,7 +153,6 @@ current = st.session_state["current_page"]
 # ── NAV BUTTON STYLES ─────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* Nav row container */
 div.nav-container > div[data-testid="stHorizontalBlock"] {
     background: #ffffff;
     border-radius: 12px;
@@ -165,7 +161,6 @@ div.nav-container > div[data-testid="stHorizontalBlock"] {
     gap: 6px !important;
     margin-bottom: 20px;
 }
-/* All buttons inside nav */
 div.nav-container button {
     border-radius: 8px !important;
     border: none !important;
@@ -176,7 +171,6 @@ div.nav-container button {
     cursor: pointer !important;
     transition: all 0.2s ease !important;
 }
-/* Inactive */
 div.nav-container button[data-testid="baseButton-secondary"] {
     background: #ffffff !important;
     color: #2c3e50 !important;
@@ -186,7 +180,6 @@ div.nav-container button[data-testid="baseButton-secondary"]:hover {
     background: #e8f8f5 !important;
     color: #17a589 !important;
 }
-/* Active */
 div.nav-container button[data-testid="baseButton-primary"] {
     background: #17a589 !important;
     color: #ffffff !important;
@@ -218,6 +211,8 @@ elif page == "Descriptive Analysis":
     import pages.descriptive_data as p
 elif page == "Machine Learning":
     import pages.machine_learning as p
+elif page == "Predict":
+    import pages.predict as p
 elif page == "About":
     import pages.about as p
 

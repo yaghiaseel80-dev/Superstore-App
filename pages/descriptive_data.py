@@ -55,20 +55,87 @@ def _prep(df):
     return df
 
 
+def _graph_filter(key_prefix, df, show_region=True, show_category=True,
+                  show_segment=False, show_shipmode=False, show_date=False):
+    """
+    Renders a small per-graph filter expander.
+    Returns a filtered copy of df based on local selections.
+    """
+    with st.expander("⚙ Graph Filters", expanded=False):
+        cols_to_show = sum([show_region, show_category, show_segment, show_shipmode])
+        cols_to_show = max(cols_to_show, 1)
+        gcols = st.columns(cols_to_show)
+        idx = 0
+        local_region = local_cat = local_seg = local_ship = "All"
+
+        if show_region and "Region" in df.columns:
+            with gcols[idx]:
+                opts = ["All"] + sorted(df["Region"].dropna().unique().tolist())
+                local_region = st.selectbox("Region", opts, key=f"{key_prefix}_region")
+            idx += 1
+
+        if show_category and "Category" in df.columns:
+            with gcols[idx]:
+                opts = ["All"] + sorted(df["Category"].dropna().unique().tolist())
+                local_cat = st.selectbox("Category", opts, key=f"{key_prefix}_cat")
+            idx += 1
+
+        if show_segment and "Segment" in df.columns:
+            with gcols[idx]:
+                opts = ["All"] + sorted(df["Segment"].dropna().unique().tolist())
+                local_seg = st.selectbox("Segment", opts, key=f"{key_prefix}_seg")
+            idx += 1
+
+        if show_shipmode and "Ship Mode" in df.columns:
+            with gcols[idx]:
+                opts = ["All"] + sorted(df["Ship Mode"].dropna().unique().tolist())
+                local_ship = st.selectbox("Ship Mode", opts, key=f"{key_prefix}_ship")
+
+        if show_date and "Order Date" in df.columns:
+            min_d = df["Order Date"].min().date()
+            max_d = df["Order Date"].max().date()
+            date_range = st.date_input("Date Range", value=(min_d, max_d),
+                                       min_value=min_d, max_value=max_d,
+                                       key=f"{key_prefix}_date")
+        else:
+            date_range = None
+
+    # Apply local filters
+    lf = df.copy()
+    if local_region != "All" and "Region" in lf.columns:    lf = lf[lf["Region"]    == local_region]
+    if local_cat    != "All" and "Category" in lf.columns:  lf = lf[lf["Category"]  == local_cat]
+    if local_seg    != "All" and "Segment" in lf.columns:   lf = lf[lf["Segment"]   == local_seg]
+    if local_ship   != "All" and "Ship Mode" in lf.columns: lf = lf[lf["Ship Mode"] == local_ship]
+    if date_range and len(date_range) == 2 and "Order Date" in lf.columns:
+        lf = lf[(lf["Order Date"] >= pd.Timestamp(date_range[0])) &
+                (lf["Order Date"] <= pd.Timestamp(date_range[1]))]
+    return lf
+
+
 def show():
     apply_style()
 
-    # Bootstrap icons on tab labels via CSS injection
     st.markdown("""
     <link rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
-    /* Sidebar styling */
-    [data-testid="stSidebar"] { background-color: #1a5276 !important; }
-    [data-testid="stSidebar"] * { color: #ffffff !important; }
-    [data-testid="stSidebar"] .stSelectbox > div > div,
-    [data-testid="stSidebar"] .stMultiSelect > div > div { background: #1e6091 !important; border-color: #2980b9 !important; }
-    [data-testid="stSidebar"] label { color: #a8d8ea !important; font-size: 12px !important; font-weight: 600 !important; }
+    /* Style per-graph filter expanders to look compact */
+    div[data-testid="stExpander"] summary p {
+        font-size: 12px !important;
+        color: #17a589 !important;
+        font-weight: 600 !important;
+    }
+    div[data-testid="stSelectbox"] label {
+        font-weight: 700 !important;
+        font-size: 12px !important;
+        color: #1a5276 !important;
+    }
+    div[data-testid="stDateInput"] label,
+    div[data-testid="stSlider"] label {
+        font-weight: 700 !important;
+        font-size: 13px !important;
+        color: #1a5276 !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -83,20 +150,8 @@ def show():
 
     df = _prep(_get_df())
 
-    # ── Inline filter bar ─────────────────────────────────────────────────────
+    # ── Global filter bar ─────────────────────────────────────────────────────
     with st.expander("⚙  Dashboard Filters", expanded=False):
-        st.markdown("""
-        <style>
-        div[data-testid="stSelectbox"] label,
-        div[data-testid="stDateInput"] label,
-        div[data-testid="stSlider"] label {
-            font-weight: 700 !important;
-            font-size: 13px !important;
-            color: #1a5276 !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
         fc1, fc2, fc3, fc4 = st.columns(4)
         with fc1:
             regions = ["All"] + sorted(df["Region"].dropna().unique().tolist()) if "Region" in df.columns else ["All"]
@@ -116,9 +171,6 @@ def show():
             max_d = df["Order Date"].max().date()
             dc1, dc2 = st.columns([3,1])
             with dc1:
-                default_dates = st.session_state.get("f_date", (min_d, max_d))
-                if not isinstance(default_dates, (list, tuple)) or len(default_dates) != 2:
-                    default_dates = (min_d, max_d)
                 date_range = st.date_input("Date Range", value=(min_d, max_d),
                                            min_value=min_d, max_value=max_d, key="f_date")
             with dc2:
@@ -138,26 +190,12 @@ def show():
     with st.expander("⚙  Visualization Parameters", expanded=False):
         pc1, pc2, pc3, pc4 = st.columns([3, 3, 3, 1.5])
         with pc1:
-            top_n = st.slider(
-                "Top N Sub-Categories",
-                min_value=3, max_value=17, value=10, step=1,
-                key="f_topn",
-                help="Controls how many sub-categories appear in ranked charts"
-            )
+            top_n = st.slider("Top N Sub-Categories", min_value=3, max_value=17,
+                              value=10, step=1, key="f_topn")
         with pc2:
-            metric = st.selectbox(
-                "Primary Metric",
-                options=["Sales", "Profit", "Quantity"],
-                key="f_metric",
-                help="Switches the main metric shown across charts"
-            )
+            metric = st.selectbox("Primary Metric", options=["Sales", "Profit", "Quantity"], key="f_metric")
         with pc3:
-            trend_type = st.selectbox(
-                "Trend Chart Type",
-                options=["Line", "Bar"],
-                key="f_trend",
-                help="Changes the monthly trend chart style"
-            )
+            trend_type = st.selectbox("Trend Chart Type", options=["Line", "Bar"], key="f_trend")
         with pc4:
             st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
             if st.button("↺  Reset", key="reset_params", use_container_width=True):
@@ -165,7 +203,7 @@ def show():
                     if k in st.session_state: del st.session_state[k]
                 st.rerun()
 
-    # Apply filters
+    # Apply global filters
     f = df.copy()
     if region    != "All" and "Region"    in df.columns: f = f[f["Region"]    == region]
     if category  != "All" and "Category"  in df.columns: f = f[f["Category"]  == category]
@@ -179,7 +217,6 @@ def show():
         st.warning("No data matches the selected filters. Please adjust your selections.")
         return
 
-    # Active filter summary
     active = [v for v in [region, category, segment, ship_mode] if v != "All"]
     if active:
         st.markdown(
@@ -191,14 +228,13 @@ def show():
             unsafe_allow_html=True
         )
 
-    # ── Tabs with Bootstrap icons ─────────────────────────────────────────────
+    # ── Tabs ──────────────────────────────────────────────────────────────────
     tab1, tab2, tab3 = st.tabs([
         "  Sales Dashboard",
         "  Profit Dashboard",
         "  Customer & Product"
     ])
 
-    # inject icons into tab labels after render
     st.markdown("""
     <style>
     button[data-baseweb="tab"]:nth-child(1)::before { content: "\\F1A7"; font-family: "bootstrap-icons"; margin-right: 6px; }
@@ -232,21 +268,22 @@ def show():
         col1, col2 = st.columns(2)
         with col1:
             if "Category" in f.columns:
-                d = f.groupby("Category")[metric].sum().reset_index().sort_values(metric, ascending=False)
+                lf = _graph_filter("s_cat", f, show_region=True, show_category=False, show_segment=True)
+                d = lf.groupby("Category")[metric].sum().reset_index().sort_values(metric, ascending=False)
                 fig = go.Figure(go.Bar(
                     x=d["Category"], y=d[metric],
                     text=d[metric].apply(_fmt), textposition="outside",
                     marker=dict(color=[TEAL, BLUE, CORAL], line_width=0)
                 ))
-                fig.update_layout(**_layout(f"{metric} by Category"),
-                    showlegend=False,
+                fig.update_layout(**_layout(f"{metric} by Category"), showlegend=False,
                     yaxis=dict(showgrid=True, gridcolor="#f0f4f8", tickformat="$,.0f", title=""),
                     xaxis=dict(showgrid=False, title=""))
                 st.plotly_chart(fig, use_container_width=True)
 
         with col2:
             if "Region" in f.columns:
-                d = f.groupby("Region")["Sales"].sum().reset_index()
+                lf = _graph_filter("s_reg", f, show_region=False, show_category=True, show_segment=True)
+                d = lf.groupby("Region")["Sales"].sum().reset_index()
                 fig = px.pie(d, names="Region", values="Sales", hole=0.48,
                              color_discrete_sequence=PALETTE)
                 fig.update_traces(textposition="outside", textinfo="percent+label", pull=[0.03]*len(d))
@@ -256,7 +293,8 @@ def show():
         col3, col4 = st.columns(2)
         with col3:
             if "Order Date" in f.columns:
-                m = f.set_index("Order Date").resample("ME")[metric].sum().reset_index()
+                lf = _graph_filter("s_trend", f, show_region=True, show_category=True, show_date=True)
+                m = lf.set_index("Order Date").resample("ME")[metric].sum().reset_index()
                 m.columns = ["Month", metric]
                 fig = go.Figure()
                 if trend_type == "Line":
@@ -268,8 +306,7 @@ def show():
                     ))
                 else:
                     fig.add_trace(go.Bar(
-                        x=m["Month"], y=m[metric],
-                        marker_color=TEAL,
+                        x=m["Month"], y=m[metric], marker_color=TEAL,
                         hovertemplate="<b>%{x|%b %Y}</b><br>" + metric + ": $%{y:,.0f}<extra></extra>"
                     ))
                 fig.update_layout(**_layout(f"Monthly {metric} Trend ({trend_type} Chart)"), showlegend=False,
@@ -279,12 +316,12 @@ def show():
 
         with col4:
             if "Ship Mode" in f.columns:
-                d = f.groupby("Ship Mode")["Sales"].sum().reset_index().sort_values("Sales")
+                lf = _graph_filter("s_ship", f, show_region=True, show_category=True, show_segment=True)
+                d = lf.groupby("Ship Mode")["Sales"].sum().reset_index().sort_values("Sales")
                 fig = go.Figure(go.Bar(
                     x=d["Sales"], y=d["Ship Mode"], orientation="h",
                     text=d["Sales"].apply(_fmt), textposition="outside",
-                    marker=dict(color=d["Sales"],
-                                colorscale=[[0,TEAL3],[1,TEAL]],
+                    marker=dict(color=d["Sales"], colorscale=[[0,TEAL3],[1,TEAL]],
                                 showscale=False, line_width=0)
                 ))
                 fig.update_layout(**_layout("Sales by Shipping Mode"), showlegend=False,
@@ -293,12 +330,12 @@ def show():
                 st.plotly_chart(fig, use_container_width=True)
 
         if "Sub-Category" in f.columns:
-            d = f.groupby("Sub-Category")[metric].sum().reset_index().sort_values(metric, ascending=False).head(top_n)
+            lf = _graph_filter("s_subcat", f, show_region=True, show_category=True, show_segment=True)
+            d = lf.groupby("Sub-Category")[metric].sum().reset_index().sort_values(metric, ascending=False).head(top_n)
             fig = go.Figure(go.Bar(
                 x=d["Sub-Category"], y=d[metric],
                 text=d[metric].apply(_fmt), textposition="outside",
-                marker=dict(color=d[metric],
-                            colorscale=[[0,TEAL3],[1,NAVY]],
+                marker=dict(color=d[metric], colorscale=[[0,TEAL3],[1,NAVY]],
                             showscale=False, line_width=0)
             ))
             fig.update_layout(**_layout(f"Top {top_n} Sub-Categories by {metric}", height=420), showlegend=False,
@@ -329,7 +366,8 @@ def show():
         col1, col2 = st.columns(2)
         with col1:
             if "Category" in f.columns:
-                d = f.groupby("Category")["Profit"].sum().reset_index().sort_values("Profit", ascending=False)
+                lf = _graph_filter("p_cat", f, show_region=True, show_category=False, show_segment=True)
+                d = lf.groupby("Category")["Profit"].sum().reset_index().sort_values("Profit", ascending=False)
                 fig = go.Figure(go.Bar(
                     x=d["Category"], y=d["Profit"],
                     text=d["Profit"].apply(_fmt), textposition="outside",
@@ -342,7 +380,8 @@ def show():
 
         with col2:
             if "Region" in f.columns:
-                d = f.groupby("Region")["Profit"].sum().reset_index()
+                lf = _graph_filter("p_reg", f, show_region=False, show_category=True, show_segment=True)
+                d = lf.groupby("Region")["Profit"].sum().reset_index()
                 fig = px.pie(d, names="Region", values="Profit", hole=0.48,
                              color_discrete_sequence=PALETTE)
                 fig.update_traces(textposition="outside", textinfo="percent+label", pull=[0.03]*len(d))
@@ -352,7 +391,8 @@ def show():
         col3, col4 = st.columns(2)
         with col3:
             if "Order Date" in f.columns:
-                m = f.set_index("Order Date").resample("ME")["Profit"].sum().reset_index()
+                lf = _graph_filter("p_trend", f, show_region=True, show_category=True, show_date=True)
+                m = lf.set_index("Order Date").resample("ME")["Profit"].sum().reset_index()
                 m.columns = ["Month","Profit"]
                 fig = go.Figure(go.Bar(
                     x=m["Month"], y=m["Profit"],
@@ -366,7 +406,8 @@ def show():
 
         with col4:
             if "Discount" in f.columns:
-                s = f.sample(min(600,len(f)), random_state=42)
+                lf = _graph_filter("p_disc", f, show_region=True, show_category=True, show_segment=True)
+                s = lf.sample(min(600,len(lf)), random_state=42)
                 fig = px.scatter(s, x="Discount", y="Profit",
                                  color="Category" if "Category" in s.columns else None,
                                  color_discrete_sequence=PALETTE, opacity=0.6)
@@ -376,7 +417,8 @@ def show():
                 st.plotly_chart(fig, use_container_width=True)
 
         if "Sub-Category" in f.columns:
-            d = f.groupby("Sub-Category")["Profit"].sum().reset_index().sort_values("Profit")
+            lf = _graph_filter("p_subcat", f, show_region=True, show_category=True, show_segment=True)
+            d = lf.groupby("Sub-Category")["Profit"].sum().reset_index().sort_values("Profit")
             fig = go.Figure(go.Bar(
                 x=d["Profit"], y=d["Sub-Category"], orientation="h",
                 text=d["Profit"].apply(_fmt), textposition="outside",
@@ -413,7 +455,8 @@ def show():
         col1, col2 = st.columns(2)
         with col1:
             if "Segment" in f.columns:
-                d = f.groupby("Segment")["Sales"].sum().reset_index()
+                lf = _graph_filter("c_seg", f, show_region=True, show_category=True, show_segment=False)
+                d = lf.groupby("Segment")["Sales"].sum().reset_index()
                 fig = px.pie(d, names="Segment", values="Sales", hole=0.48,
                              color_discrete_sequence=PALETTE)
                 fig.update_traces(textposition="outside", textinfo="percent+label", pull=[0.03]*len(d))
@@ -422,7 +465,8 @@ def show():
 
         with col2:
             if "Segment" in f.columns and "Category" in f.columns:
-                d = f.groupby(["Segment","Category"])["Sales"].sum().reset_index()
+                lf = _graph_filter("c_segcat", f, show_region=True, show_segment=True, show_category=False)
+                d = lf.groupby(["Segment","Category"])["Sales"].sum().reset_index()
                 fig = px.bar(d, x="Segment", y="Sales", color="Category",
                              barmode="group", color_discrete_sequence=PALETTE)
                 fig.update_traces(marker_line_width=0)
@@ -434,14 +478,14 @@ def show():
         col3, col4 = st.columns(2)
         with col3:
             if "Product Name" in f.columns:
-                d = (f.groupby("Product Name")["Sales"].sum()
+                lf = _graph_filter("c_prod", f, show_region=True, show_category=True, show_segment=True)
+                d = (lf.groupby("Product Name")["Sales"].sum()
                      .nlargest(10).reset_index().sort_values("Sales"))
                 d["Short"] = d["Product Name"].str[:28] + "…"
                 fig = go.Figure(go.Bar(
                     x=d["Sales"], y=d["Short"], orientation="h",
                     text=d["Sales"].apply(_fmt), textposition="outside",
-                    marker=dict(color=d["Sales"],
-                                colorscale=[[0,TEAL3],[1,NAVY]],
+                    marker=dict(color=d["Sales"], colorscale=[[0,TEAL3],[1,NAVY]],
                                 showscale=False, line_width=0),
                     hovertext=d["Product Name"], hoverinfo="text+x"
                 ))
@@ -452,7 +496,8 @@ def show():
 
         with col4:
             if "Category" in f.columns and "Quantity" in f.columns:
-                d = f.groupby("Category")["Quantity"].sum().reset_index().sort_values("Quantity", ascending=False)
+                lf = _graph_filter("c_qty", f, show_region=True, show_category=False, show_segment=True)
+                d = lf.groupby("Category")["Quantity"].sum().reset_index().sort_values("Quantity", ascending=False)
                 fig = go.Figure(go.Bar(
                     x=d["Category"], y=d["Quantity"],
                     text=d["Quantity"].apply(_fmt_n), textposition="outside",
@@ -463,17 +508,17 @@ def show():
                     xaxis=dict(showgrid=False))
                 st.plotly_chart(fig, use_container_width=True)
 
-        # Heatmap
         if "Region" in f.columns and "Category" in f.columns:
-            pivot = f.pivot_table(values="Sales", index="Region",
-                                  columns="Category", aggfunc="sum").fillna(0)
+            lf = _graph_filter("c_heat", f, show_region=False, show_category=False, show_segment=True, show_shipmode=True)
+            pivot = lf.pivot_table(values="Sales", index="Region",
+                                   columns="Category", aggfunc="sum").fillna(0)
             mean_val = pivot.values.mean()
             fig = px.imshow(pivot,
                             color_continuous_scale=[[0,"#e8f8f5"],[0.5,TEAL3],[1,NAVY]],
                             aspect="auto", text_auto=False)
             for i, row in enumerate(pivot.index):
-                for j, col in enumerate(pivot.columns):
-                    v = pivot.loc[row, col]
+                for j, col_name in enumerate(pivot.columns):
+                    v = pivot.loc[row, col_name]
                     fig.add_annotation(x=j, y=i,
                         text=f"${v/1000:.1f}K",
                         showarrow=False,
